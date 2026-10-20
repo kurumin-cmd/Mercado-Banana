@@ -6,93 +6,157 @@ from argon2.exceptions import VerifyMismatchError
 
 ph = PasswordHasher()
 
+# ==============================
+# CONEXÕES COM OS BANCOS
+# ==============================
+
 # usuarios SQL
-# columns = id, nome, idade, senha
 usuarios = sqlite3.connect('usuarios.db')
 cursor_usuarios = usuarios.cursor()
 
 # produtos SQL
-# columns = id, nome, valor, estoque
 produtos = sqlite3.connect('produtos.db')
 cursor_produtos = produtos.cursor()
 
 # vendas SQL
-# columns = id, client_id, produto_id, quantidade, valor_unitario
 vendas = sqlite3.connect('vendas.db')
 cursor_vendas = vendas.cursor()
 
-# Conectar os outros bancos ao banco de vendas
-cursor_vendas.execute("ATTACH DATABASE 'usuarios.db' AS usuarios_db")
-cursor_vendas.execute("ATTACH DATABASE 'produtos.db' AS db_produtos")
+
+# ==============================
+# CRIAR TABELAS
+# ==============================
+
+cursor_usuarios.execute("""
+CREATE TABLE IF NOT EXISTS usuarios (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nome TEXT NOT NULL,
+    idade INTEGER NOT NULL,
+    senha TEXT NOT NULL
+)
+""")
+usuarios.commit()
+
+
+cursor_produtos.execute("""
+CREATE TABLE IF NOT EXISTS produtos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nome TEXT NOT NULL,
+    valor REAL NOT NULL,
+    estoque INTEGER NOT NULL
+)
+""")
+produtos.commit()
+
+
+cursor_vendas.execute("""
+CREATE TABLE IF NOT EXISTS vendas (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    client_id INTEGER NOT NULL,
+    produto_id INTEGER NOT NULL,
+    quantidade INTEGER NOT NULL,
+    valor_unitario REAL NOT NULL
+)
+""")
+vendas.commit()
+
+
+# ==============================
+# PRODUTOS INICIAIS
+# ==============================
+
+cursor_produtos.executemany("""
+INSERT OR IGNORE INTO produtos (id, nome, valor, estoque)
+VALUES (?, ?, ?, ?)
+""", [
+    (1, 'Banana', 5.00, 50),
+    (2, 'Maçã', 7.50, 50),
+    (3, 'Arroz', 25.00, 50),
+    (4, 'Feijão', 8.00, 50),
+    (5, 'Leite', 6.00, 50)
+])
+
+produtos.commit()
+
+
+# ==============================
+# CONECTAR OS BANCOS
+# ==============================
+
+cursor_vendas.execute(
+    "ATTACH DATABASE 'usuarios.db' AS usuarios_db"
+)
+cursor_vendas.execute(
+    "ATTACH DATABASE 'produtos.db' AS db_produtos"
+)
+
 
 carrinho = []
 sub_total = 0
 id_compra = None
 
 
-# Login
+# ==============================
+# LOGIN
+# ==============================
+
 def login():
     global id_compra
 
-    time.sleep(0.2)
-    print('iniciando sistema de login')
+    print('Iniciando sistema de login')
 
-    nome = input('digite o nome de usuario: ')
-    senha = input('digite sua senha: ')
+    nome = input('Digite o nome de usuario: ')
+    senha = input('Digite sua senha: ')
 
-    cursor_usuarios.execute('''
+    cursor_usuarios.execute("""
         SELECT senha, id FROM usuarios
         WHERE nome = ?
-    ''', (nome,))
+    """, (nome,))
 
     validar = cursor_usuarios.fetchone()
 
     if validar:
         try:
-            senha_hash = validar[0]
-            ph.verify(senha_hash, senha)
+            ph.verify(validar[0], senha)
 
-            print('acesso concedido')
-            time.sleep(0.5)
-
+            print('Acesso concedido!')
             id_compra = validar[1]
             loja()
 
         except VerifyMismatchError:
-            print('senha incorreta.')
-            time.sleep(0.5)
+            print('Senha incorreta.')
 
     else:
-        print('usuario não encontrado')
-        print('deseja realizar um cadastro?')
-        print('1- sim // 2- não')
+        print('Usuario nao encontrado.')
+        print('Deseja realizar um cadastro?')
+        print('1 - Sim')
+        print('2 - Nao')
 
         try:
-            of = int(input('digite o valor:'))
+            opcao = int(input('Digite sua opcao: '))
         except ValueError:
-            print('digite apenas numeros')
+            print('Digite apenas numeros.')
             return
 
-        if of == 1:
+        if opcao == 1:
             cadastro()
 
-        elif of == 2:
-            return
 
+# ==============================
+# CADASTRO
+# ==============================
 
-# Cadastro
 def cadastro():
-    time.sleep(0.2)
-    nome_cad = input('crie um nome de usuario: ')
+    nome_cad = input('Crie um nome de usuario: ')
 
     while True:
         try:
-            idade = int(input('digite sua idade: '))
+            idade = int(input('Digite sua idade: '))
             break
         except ValueError:
-            print('digite apenas numeros nesse campo!')
+            print('Digite apenas numeros nesse campo!')
 
-    senha_cad = input('digite sua senha de usuario: ')
+    senha_cad = input('Digite sua senha: ')
     senha_hash = ph.hash(senha_cad)
 
     cursor_usuarios.execute("""
@@ -102,105 +166,75 @@ def cadastro():
 
     usuarios.commit()
 
-    print(
-        f'você foi cadastrado com sucesso {nome_cad}, '
-        'Bem vindo, faça login e aproveite nosso sistema.'
-    )
-    time.sleep(2)
+    print(f'Cadastro realizado com sucesso, {nome_cad}!')
+    print('Agora faca login para acessar o sistema.')
 
 
-# Ver produtos
+# ==============================
+# VER PRODUTOS E ADICIONAR AO CARRINHO
+# ==============================
+
 def ver_produtos():
     global sub_total
 
-    cursor_produtos.execute('''
-        SELECT id, nome, valor FROM produtos
-    ''')
+    cursor_produtos.execute("""
+        SELECT id, nome, valor, estoque
+        FROM produtos
+    """)
 
     resultado = cursor_produtos.fetchall()
 
-    print('======PRODUTOS======')
-    print('===nome=====valor===')
+    print('\\n====== PRODUTOS ======')
 
     for produto in resultado:
-        print(f'{produto[0]}: {produto[1]} - R${produto[2]:.2f}')
-
-    time.sleep(1)
-
-    def recalcular_sub_total():
-        global sub_total
-        sub_total = 0
-
-        for item in carrinho:
-            sub_total += item['total']
-
-        return sub_total
+        print(
+            f'{produto[0]}: {produto[1]} - '
+            f'R$ {produto[2]:.2f} '
+            f'(Estoque: {produto[3]})'
+        )
 
     while True:
+        print('\\n0 - Voltar')
         try:
-            print('0 - Voltar/remover item do carrinho')
             carrinho_produto = int(
-                input('digite o numero do produto que deseja adicionar ao carrinho: ')
+                input('Digite o ID do produto: ')
             )
-
-            if carrinho_produto == 0:
-                print('1- Remover item do carrinho')
-                print('2- Voltar')
-
-                opp = int(input('digite sua opção: '))
-
-                if opp == 1:
-                    for mostre in carrinho:
-                        print(mostre)
-
-                    carrier = int(
-                        input('digite o id do produto que deseja remover: ')
-                    )
-
-                    for item in carrinho:
-                        if carrier == item['id']:
-                            carrinho.remove(item)
-                            break
-
-                    recalcular_sub_total()
-
-                elif opp == 2:
-                    return
-
-                continue
-
-            carrinho_estoque = int(
-                input('digite a quantidade desejada do produto: ')
-            )
-
         except ValueError:
-            print('Digite apenas numeros')
+            print('Digite apenas numeros.')
+            continue
+
+        if carrinho_produto == 0:
+            return
+
+        try:
+            carrinho_estoque = int(
+                input('Digite a quantidade desejada: ')
+            )
+        except ValueError:
+            print('Digite apenas numeros.')
             continue
 
         if carrinho_estoque <= 0:
-            print('estoque invalido')
+            print('Quantidade invalida.')
             continue
 
-        cursor_produtos.execute('''
-            SELECT id, estoque, valor, nome FROM produtos
+        cursor_produtos.execute("""
+            SELECT id, estoque, valor, nome
+            FROM produtos
             WHERE id = ?
-        ''', (carrinho_produto,))
+        """, (carrinho_produto,))
 
         resultado_produtos = cursor_produtos.fetchone()
 
         if resultado_produtos is None:
-            print('produto inexistente')
+            print('Produto inexistente.')
             continue
 
-        novo_estoque = resultado_produtos[1] - carrinho_estoque
-
-        if novo_estoque < 0:
-            print('estoque insuficiente, favor selecione outro produto')
+        if carrinho_estoque > resultado_produtos[1]:
+            print('Estoque insuficiente.')
             continue
 
         valor_conta = carrinho_estoque * resultado_produtos[2]
-
-        sub_total += valor_conta
 
         item = {
             'id': carrinho_produto,
@@ -211,69 +245,116 @@ def ver_produtos():
         }
 
         carrinho.append(item)
+        sub_total += valor_conta
 
-        for itens in carrinho:
-            print(itens)
-
+        print(f"{item['nome']} adicionado ao carrinho.")
         print(f'Subtotal: R$ {sub_total:.2f}')
 
 
-# Comprar
+# ==============================
+# COMPRAR
+# ==============================
+
 def comprar():
     global carrinho, sub_total
 
-    print('deseja confirmar a compra?')
-    print('1- Sim')
-    print('2- Não')
-
-    try:
-        confirmar = int(input('digite o valor: '))
-    except ValueError:
-        print('digite apenas numeros!')
+    if not carrinho:
+        print('Seu carrinho esta vazio.')
         return
 
-    if confirmar == 1:
-        if not carrinho:
-            print('seu carrinho está vazio.')
-            return
+    print(f'Total da compra: R$ {sub_total:.2f}')
+    print('1 - Confirmar compra')
+    print('2 - Cancelar compra')
 
-        print('iniciando sua compra...')
+    try:
+        confirmar = int(input('Digite sua opcao: '))
+    except ValueError:
+        print('Digite apenas numeros.')
+        return
 
-        for compras in carrinho:
-            cursor_vendas.execute('''
+    if confirmar == 2:
+        carrinho = []
+        sub_total = 0
+        print('Compra cancelada.')
+        return
+
+    if confirmar != 1:
+        print('Opcao invalida.')
+        return
+
+    try:
+        # Verificar novamente o estoque e registrar a venda
+        for compra in carrinho:
+            cursor_produtos.execute("""
+                SELECT estoque
+                FROM produtos
+                WHERE id = ?
+            """, (compra['id'],))
+
+            resultado = cursor_produtos.fetchone()
+
+            if resultado is None or resultado[0] < compra['quantidade']:
+                raise ValueError(
+                    f"Estoque insuficiente para {compra['nome']}."
+                )
+
+        for compra in carrinho:
+            cursor_vendas.execute("""
                 INSERT INTO vendas
                     (client_id, produto_id, quantidade, valor_unitario)
                 VALUES (?, ?, ?, ?)
-            ''', (
+            """, (
                 id_compra,
-                compras['id'],
-                compras['quantidade'],
-                compras['valor']
+                compra['id'],
+                compra['quantidade'],
+                compra['valor']
             ))
 
+            cursor_produtos.execute("""
+                UPDATE produtos
+                SET estoque = estoque - ?
+                WHERE id = ?
+            """, (compra['quantidade'], compra['id']))
+
         vendas.commit()
+        produtos.commit()
 
-        print('compra registrada com sucesso!')
+        print('Compra registrada com sucesso!')
+
         carrinho = []
         sub_total = 0
 
-    elif confirmar == 2:
-        carrinho = []
-        sub_total = 0
-        print('compra cancelada.')
+    except (ValueError, sqlite3.Error) as erro:
+        vendas.rollback()
+        produtos.rollback()
+        print(f'Nao foi possivel concluir a compra: {erro}')
 
 
-# Ver carrinho
+# ==============================
+# VER CARRINHO
+# ==============================
+
 def ver_carrinho():
-    for mostrar in carrinho:
-        print(mostrar)
+    if not carrinho:
+        print('Seu carrinho esta vazio.')
+        return
+
+    for item in carrinho:
+        print(
+            f"{item['nome']} | "
+            f"Quantidade: {item['quantidade']} | "
+            f"Total: R$ {item['total']:.2f}"
+        )
 
     print(f'Subtotal: R$ {sub_total:.2f}')
 
 
-# Histórico de compras
+# ==============================
+# HISTORICO DE COMPRAS
+# ==============================
+
 def visualizar_compras():
-    cursor_vendas.execute('''
+    cursor_vendas.execute("""
         SELECT
             usuarios_db.usuarios.id,
             usuarios_db.usuarios.nome,
@@ -286,7 +367,7 @@ def visualizar_compras():
         JOIN db_produtos.produtos
             ON db_produtos.produtos.id = vendas.produto_id
         WHERE usuarios_db.usuarios.id = ?
-    ''', (id_compra,))
+    """, (id_compra,))
 
     compras = cursor_vendas.fetchall()
 
@@ -294,7 +375,7 @@ def visualizar_compras():
         print('Nenhuma compra encontrada.')
         return
 
-    print('\\n===== HISTÓRICO DE COMPRAS =====')
+    print('\\n===== HISTORICO DE COMPRAS =====')
 
     for mostrar in compras:
         print(f'''
@@ -302,17 +383,23 @@ ID do cliente: {mostrar[0]}
 Nome do cliente: {mostrar[1]}
 Produto: {mostrar[2]}
 Quantidade: {mostrar[3]}
-Valor unitário: R$ {mostrar[4]:.2f}
+Valor unitario: R$ {mostrar[4]:.2f}
 ----------------------------
 ''')
 
 
-# Sair
+# ==============================
+# SAIR DA LOJA
+# ==============================
+
 def sair():
     return
 
 
-# Loja
+# ==============================
+# MENU DA LOJA
+# ==============================
+
 def loja():
     while True:
         print('\\n===== MERCADO BANANA =====')
@@ -323,9 +410,11 @@ def loja():
         print('5 - Sair')
 
         try:
-            option_menu = int(input('digite a opção desejada: '))
+            option_menu = int(
+                input('Digite a opcao desejada: ')
+            )
         except ValueError:
-            print('digite apenas numeros!!!')
+            print('Digite apenas numeros!')
             continue
 
         if option_menu == 1:
@@ -344,38 +433,43 @@ def loja():
             return
 
         else:
-            print('opção inválida')
+            print('Opcao invalida.')
 
 
-# Parte principal
-while True:
-    print('==============================')
-    print('         MERCADINHO')
-    print('    Sistema de Login')
-    print('==============================')
-    print()
-    print('[1] Login')
-    print('[2] Cadastro')
-    print('[3] Sair')
+# ==============================
+# MENU PRINCIPAL
+# ==============================
 
-    try:
-        opcao = int(input('Escolha uma opção: '))
-    except ValueError:
-        print('Digite apenas numeros!')
-        continue
+try:
+    while True:
+        print('\\n==============================')
+        print('         MERCADINHO')
+        print('      Sistema de Login')
+        print('==============================')
+        print('[1] Login')
+        print('[2] Cadastro')
+        print('[3] Sair')
 
-    if opcao == 1:
-        login()
+        try:
+            opcao = int(input('Escolha uma opcao: '))
+        except ValueError:
+            print('Digite apenas numeros!')
+            continue
 
-    elif opcao == 2:
-        cadastro()
+        if opcao == 1:
+            login()
 
-    elif opcao == 3:
-        break
+        elif opcao == 2:
+            cadastro()
 
-    else:
-        print('opção inválida')
+        elif opcao == 3:
+            break
 
-usuarios.close()
-produtos.close()
-vendas.close()
+        else:
+            print('Opcao invalida.')
+
+finally:
+    usuarios.close()
+    produtos.close()
+    vendas.close()
+
